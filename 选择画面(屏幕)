@@ -1,0 +1,243 @@
+*-选择屏幕触发的是AT SELECTION-SCREEN,点击屏幕上元素（包括按钮、单选复选按钮、下拉列表、菜单、工具条）
+  AT SELECTION-SCREEN
+*-列表屏幕触发的是AT USER-COMMAND事件
+  AT USER-COMMAND
+  
+*-屏幕流逻辑
+  PROCESS BEFORE OUTPUT.
+  PROCESS AFTER INPUT.
+  PROCESS ON HELP-REQUEST.
+  PROCESS ON VALUE-REQUEST.
+
+*-格式化屏幕
+  SELECTION-SCREEN SKIP                                  "空行
+  SELECTION-SCREEN ULINE                                 "水平线
+  SELECTION-SCREEN COMMENT text FOR FIELD sel            "文本标签
+  SELECTION-SCREEN PUSHBUTTON bt_text USER-COMMAND fcode "按钮
+  SELECTION-SCREEN BEGIN OF LINE                         "多元素行
+  SELECTION-SCREEN BEGIN OF BLOCK block                  "屏幕块
+  SELECTION-SCREEN BEGIN OF TABBED BLOCK tblock          "Tabstrip
+  SELECTION-SCREEN FUNCTION KEY n                        "激活工具栏中预设按钮
+  SELECTION-SCREEN BEGIN OF SCREEN dynnr [AS SUBSCREEN]  "定义屏幕或子屏幕
+
+*-单选框
+  PARAMETERS:
+    p_a TYPE c
+      OBLIGATORY       "必输
+      MODIF ID key     "设置修改组代码，方便屏幕的元素的批量修改
+      MATCHCODE OBJECT "指定一个search_help
+      MEMORY ID pid    "进行同一用户会话不同窗口间的参数传递
+      VALUE CHECK,     "开启系统自动检验
+      
+    p_b TYPE as CHECKBOX                     "选择框
+      USER-COMMAND chk,     
+    p_radio1 TYPE c RADIOBUTTON GROUP g1     "单选按钮
+      USER-COMMAND rbt,
+    p_radio2 TYPE c RADIOBUTTON GROUP g1.    
+    p_carri2 LIKE spfli-carrid AS LISTBOX VISIBLE LENGTH 20  "下拉列表
+      USER-COMMAND lst
+     
+*-复选框
+  SELECT-OPTIONS:
+    s_a FOR {dobj|(name)}      "参照一个变数
+    NO-EXTENSION               "限制选择表为单行
+    NO INTERVALS               "只会出现LOW字段
+    OBLIGATORY                 "必输只能LOW字段有效
+    DEFAULT                    "默认
+    MEMORY ID                  "将第一个输入框中的数据存放到共享
+    
+*-各种屏幕元素演示
+  TABLES: 
+    mara,
+    marc.
+  DATA: 
+    g_pg(24).
+  SELECTION-SCREEN BEGIN OF BLOCK bk1 WITH FRAME TITLE text-001.
+    PARAMETERS: 
+      p_bukrs TYPE t001-bukrs OBLIGATORY.
+      
+    SELECT-OPTIONS:
+      s_werks FOR marc-werks OBLIGATORY NO INTERVALS,
+      s_matnr FOR mara-matnr NO-EXTENSION ,
+      s_segme FOR g_pg.
+      
+    PARAMETERS: p_line(6).
+    
+    SELECTION-SCREEN SKIP 1.
+    
+    PARAMETERS: 
+      p_x1 RADIOBUTTON GROUP gp1 DEFAULT 'X',
+      p_x2 RADIOBUTTON GROUP gp1.
+      
+    PARAMETERS: 
+      p_old TYPE c  AS CHECKBOX.
+      
+    PARAMETERS: 
+      p_oldhir LIKE grpdynp-name_coall MODIF ID m1 DEFAULT 'ABB_CHINA.XXXX'.
+  
+    SELECTION-SCREEN:SKIP 1.
+    SELECTION-SCREEN BEGIN OF LINE.
+      PARAMETERS:
+        p_dwload AS CHECKBOX.
+        
+      SELECTION-SCREEN COMMENT 5(29) text-001.
+      
+      PARAMETERS: 
+        p_file TYPE string.
+    SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN END OF BLOCK bk1.
+    
+*-选择屏幕中的按钮
+  SELECTION-SCREEN:
+    PUSHBUTTON 2(12)  but1 USER-COMMAND cli1.
+  INITIALIZATION.
+   but1 = 'Button 1'.                               "可直接设置按钮上的标签文本
+  AT SELECTION-SCREEN.
+    CASE sy-ucomm.
+    WHEN 'CLI1'.
+  ENDCASE.  
+  
+*-选择屏幕中的单选/复选按钮：点击时显示、隐藏其他屏幕元素
+  PARAMETERS:
+    show_all AS CHECKBOX USER-COMMAND flag.
+    hide  RADIOBUTTON GROUP  rd USER-COMMAND flag2 DEFAULT 'X'.
+    show  RADIOBUTTON GROUP  rd .
+  SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME .
+    PARAMETERS: 
+      p1 TYPE c LENGTH 10 ,
+      p2 TYPE c LENGTH 10.
+  SELECTION-SCREEN END OF BLOCK b1.
+  SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE t.
+    PARAMETERS:   
+      p3 TYPE c LENGTH 10 MODIF ID bl2,
+      p4 TYPE c LENGTH 10 MODIF ID bl2.
+  SELECTION-SCREEN END OF BLOCK b2.
+  SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME .
+    PARAMETERS: 
+      p5 TYPE c LENGTH 10 MODIF ID bl3,
+      p6 TYPE c LENGTH 10 MODIF ID bl3.
+  SELECTION-SCREEN END OF BLOCK b3.
+ 
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF show_all = 'X'  AND screen-group1 = 'BL2'.
+      screen-active = '1'."显示
+      MODIFY SCREEN.
+      ELSEIF screen-group1 = 'BL2'.
+      screen-active = '0'."隐藏
+      MODIFY SCREEN.
+    ENDIF.
+    IF  show = 'X'  AND screen-group1 = 'BL3'.
+      screen-active = '1'.
+      MODIFY SCREEN.
+      ELSEIF  screen-group1 = 'BL3'.
+      screen-active = '0'.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.  
+
+*-选择屏幕中下拉列表
+  PARAMETERS p_carri1 LIKE spfli-carrid
+     AS LISTBOX VISIBLE LENGTH 20
+     USER-COMMAND onli
+     DEFAULT 'LH'.
+*除了通过参数表字段外，还可以通过VRM_SET_VALUES函数为下拉框初始化列表项     
+ 
+*-使用FIELD语句后，屏幕字段<f>需要在该语句处理完后才传递到ABAP程序相应的字段中
+  FIELD <f>.
+*-如需对屏幕字段进行检验，通过以下语句来实现检验
+  FIELD dynp_field MODULE mod ON INPUT                     "只要该字段不为初始值就会触发module
+                              ON REQUEST                   "该字段发生变化后触发module
+                              ON *-INPUT        
+                              AT CURSOR-SELECTION.
+  CHAIN.
+    FIELD: <f1>, <f2>,<fi...>.
+    MODULE <mod1> ON CHAIN-INPUT|CHAIN-REQUEST.            "只要<fi>中某个字段满足条件（<mod1>后面的CHAIN-INPUT与CHAIN-REQUEST条件），<mod1>就会被调用
+    FIELD: <g1>, <g2>,<gi...>.
+    MODULE <mod2> ON CHAIN-INPUT|CHAIN-REQUEST.            "只要<fi>或<gi>中的某个字段满足条件，则<mod2>就会被调用
+    ... 
+  ENDCHAIN.  
+  
+  CHAIN.
+    IELD: <f1>, <f2>,<fi...>.
+    IELD <f> MODULE <mod1> ON INPUT|REQUEST|*-INPUT|CHAIN-INPUT|CHAIN-REQUEST. "<mod1>被调用的条件是所对应字段<f>满足ON后面指定的条件即可执行
+    ODULE <mod2> ON CHAIN-INPUT|CHAIN-REQUEST.                                 "<mod2>被调用的条件是只要<fi>或<f>中的某个字段满足条件即可执行
+  ENDCHAIN.
+
+*-ON INPUT与ON CHAIN-INPUT区别
+  CHAIN.
+    FIELD: f1,f2.
+    FIELD: f3 MODULE mod1 ON INPUT.      "只有f3为非初始值时才调用mod1
+  ENDCHAIN.
+  
+  CHAIN.
+    FIELD:f1,f2.
+    FIELD:f3 MODULE mod1 ON CHAIN-INPUT. "f1,f2,f3中任一字段包含非初始值时都调用mod1
+  ENDCHAIN
+ 
+*-对话屏幕中，对于E类型的Function Code，可以使用如下语句在PAI事件块中来触发：
+  MODULE <mod> AT EXIT-COMMAND.
+*-在选择屏幕上，对于E类型的FunCode如点击红绿黄会触发事件  
+  AT SELECTION-SCREEN ON EXIT-COMMAND
+*-OK_CODE只有在FunCode非空时才会被重置,使用前需拷贝
+  
+*-选择屏幕、对话屏幕都有对应的SCREEN内表，下面是几个重要属性：
+  SCREEN-NAME    "如果参数是select-options类型参数，则参数名以LOW与HIGH后缀来区分
+  SCREEN-GROUP1  "选择屏幕元素通过MODIF ID选项设置GROUP1（对话屏幕通过属性设置），将屏幕元素分为一组，方便屏幕的元素的批量修改
+  SCREEN-REQUIRED"控制文本框、下拉列表屏幕元素的必输性
+                 "0：不必输，框中前面也没有钩
+                 "1：必输，框中前面有钩，系统会自动检验是否已输入，相当于OBLIGATORY选项
+                 "2：不必输，但框中前面有钩，系统不会检查是否已输入，此时需要手动检验
+  SCREEN-INPUT   "控制屏幕元素（包括复选框、单选框、文本框）的可输性  
+  SCREEN-ACTIVE  "控制屏幕元素的可见性
+  
+*-用来隐藏 p_lclfil  
+  PARAMETERS p_rd1 RADIOBUTTON GROUP gp1 USER-COMMAND mxx.
+*-用来显示 p_lclfil  
+  PARAMETERS p_rd2 RADIOBUTTON GROUP gp1 DEFAULT 'X'.     
+*-当通过程序动态修改屏幕元素属性 required 后，会忽略掉这里的 OBLIGATORY 选项
+  PARAMETERS p_lclfil(128) MODIF ID  mxy OBLIGATORY .
+*-没什么作用，用来测试 CHECKBOX 的可输入性  
+  PARAMETERS: c AS CHECKBOX.
+*-当 C2 被钩选时，屏幕上的其他输入元素均不可输入
+  PARAMETERS: c2 AS CHECKBOX USER-COMMAND ddd DEFAULT 'X'.
+  
+  AT SELECTION-SCREEN OUTPUT.
+    LOOP AT SCREEN  .
+*-  当 C2 没有钩选时，其他元素都设置为可输入
+      IF screen-name <> 'C2' AND c2 IS INITIAL .
+        screen-input = 1.
+        MODIFY SCREEN.
+        ELSEIF screen-name <> 'C2' AND c2 IS NOT INITIAL .
+          screen-input = 0."C2钩选时，所以屏幕输入元素禁止输入
+        MODIFY SCREEN.
+      ENDIF.
+*-    控制下拉列表（文本框也是一样）的必输性：外观上打钩，但不自动校验
+      IF p_rd2 = 'X' AND screen-group1 = 'MXY'.
+*-      显示
+        screen-active = '1'.
+        screen-required = '2'."外观上打钩，但不自动校验
+        MODIFY SCREEN.
+        ELSEIF screen-group1 = 'MXY'. 
+*-      隐藏
+        screen-active = '0'.
+        screen-required = '2'.
+        MODIFY SCREEN.
+      ENDIF.
+    ENDLOOP.
+  
+  AT SELECTION-SCREEN ON p_lclfil.
+*-  手动检验：但当点击单选按钮与复选框 C2 时，不校验  
+    IF p_rd2 IS NOT INITIAL
+    AND sy-ucomm <> 'MXX' AND sy-ucomm <> 'DDD' AND p_lclfil IS INITIAL.
+      MESSAGE e055(00).
+    ENDIF.
+    
+*-屏幕跳转
+  LEAVE TO SCREEN <next screen>. "立即结束本画面的执行，调用所指定的画面，在调用画面中，无法再返回原主调画面
+  LEAVE TO SCREEN 0              "结束当前SCREEN
+  CALL SCREEN XXXX               "将在Screen上面添加一层Screen调用,当使用LEAVE TO SCREEN 0时，能够返回原主调画面
+  LEAVE SCREEN                   "后面的语句也不会执行
+  
+*-修改标准选择屏幕的GUI Status
+"如果想修改标准选择屏幕的GUIstatus,则可以在选择屏幕的PBO(AT SELECTION-SCREEN OUTPUT)事件里调用RS_SET_SELSCREEN_STATUS函数来实现。
