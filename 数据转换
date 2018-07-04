@@ -1,0 +1,36 @@
+*-输入转换，前面补齐零
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING 
+      input  = str
+    IMPORTING 
+      output = vbeln.
+      
+*-输出转换，去掉前导零
+  CONVERSION_EXIT_ALPHA_OUTPUT
+  
+*-数量小位数格式化
+  WRITE: i_menge UNIT 'ST'.
+  
+*-单位换算：UNIT_CONVERSION_SIMPLE
+  CALL FUNCTION 'UNIT_CONVERSION_SIMPLE'
+    EXPORTING
+      input      = p_in
+      round_sign = round"舍入方式(+ up, - down, X comm, SPACE.)
+      unit_in    = unit_in
+      unit_out   = unit_out
+    IMPORTING
+      output     = result.
+      
+*-货币格式化
+  WRITE: p CURRENCY 'JPY'
+*-转换成数据库中内部存储金额
+  BAPI_CURRENCY_CONV_TO_INTERNAL
+*-转换成外部实际金额
+  BAPI_CURRENCY_CONV_TO_external
+*-将外币转换为本位币
+  CONVERT_TO_FOREIGN_CURRENCY
+*-将本位币转换为其他外币
+  CONVERT_TO_LOCAL_CURRENCY
+  
+  
+  
