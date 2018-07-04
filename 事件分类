@@ -1,0 +1,36 @@
+*-报表事件
+  INITIALIZATION.        
+  START-OF-SELECTION.    
+  END-OF-SELECTION.      
+  
+*-选择屏幕事件
+  AT SELECTION-SCREEN 
+  
+*-列表事件
+  TOP-OF-PAGE.
+  END-OF-PAGE.
+  
+*-退出当前执行的程序块
+  RETURN
+  
+*-跳出当前循环
+  EXIT
+
+*-跳出当前事件块，继续下一个事件块的处理,相当于方法的return
+  CHECK
+  
+*-退出整个程序
+  LEAVE PROGRAM.
+  
+*-从list 回到dialog
+  LEAVE LIST-PROCESSING.  
+  
+*-控制权从dialog 转交给list 
+  LEAVE TO LIST-PROCESSING
+  
+*-标准的 List Status
+  SET PF-STATUS space.
+  
+*-LIST 打印输出
+  SET_PRINT_PARAMETERS
+  GET_PRINT_PARAMETERS
