@@ -1,0 +1,12 @@
+*-系统日期
+  sy-datum
+  sy-datlo
+"区别：当公司处于不同时区需要使用‘SY-DATLO’
+
+*-系统时间
+  sy-uzeit
+  sy-timlo
+"区别同日期
+
+*-系统后台执行
+  sy-batch
