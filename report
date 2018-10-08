@@ -1,0 +1,26 @@
+************************************************************************
+* Report                 y_sql_xxxxxx
+* Written By           : XXXX
+* Date Written         : XXXX/XX/XX
+* Program Purpose      : SQL优化
+************************************************************************
+
+REPORT   y_sql_xxxxxx .
+
+*INCLUDE y_sql_f08.
+INCLUDE y_sql_f01.
+INCLUDE y_sql_top.
+INCLUDE y_sql_f02.
+INCLUDE y_sql_f03.
+INCLUDE y_sql_f07.
+INCLUDE y_sql_f04.
+INCLUDE y_sql_f05.
+INCLUDE y_sql_f06.
+
+INCLUDE y_sql_o01.
+INCLUDE y_sql_o02.
+INCLUDE y_sql_i01.
+INCLUDE y_sql_i02.
+
+START-OF-SELECTION.
+  CALL SCREEN c_100.
