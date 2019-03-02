@@ -4,7 +4,6 @@
 *&
 *&---------------------------------------------------------------------*
 REPORT Y_TEST_2.
-*REPORT  zcode_generator_batch_input.
 
 TYPE-POOLS: ole2.
 
