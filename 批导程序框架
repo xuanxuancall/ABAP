@@ -1,0 +1,1555 @@
+*&---------------------------------------------------------------------*
+*& Report Y_TEST_2
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT Y_TEST_2.
+*REPORT  zcode_generator_batch_input.
+
+TYPE-POOLS: ole2.
+
+TABLES: sscrfields.
+SELECTION-SCREEN BEGIN OF BLOCK 001 WITH FRAME TITLE title1.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (28) text1.
+SELECTION-SCREEN POSITION 29.
+PARAMETERS p_prog TYPE programm.
+SELECTION-SCREEN PUSHBUTTON 74(10) gen USER-COMMAND gen.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (28) text2.
+SELECTION-SCREEN POSITION 29.
+PARAMETERS p_addr1 TYPE char4 DEFAULT 'A2'.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (28) text3.
+SELECTION-SCREEN POSITION 29.
+PARAMETERS p_addr2 TYPE char10 DEFAULT ''.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (28) text4.
+SELECTION-SCREEN POSITION 29.
+PARAMETERS p_fname TYPE filename LOWER CASE DEFAULT '导入模板.xls'.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN ULINE.
+
+SELECTION-SCREEN COMMENT /1(79) cmt1.
+SELECTION-SCREEN COMMENT /1(79) cmt2.
+SELECTION-SCREEN COMMENT /1(79) cmt3.
+SELECTION-SCREEN COMMENT /1(79) cmt4.
+SELECTION-SCREEN COMMENT /1(79) cmt5.
+SELECTION-SCREEN COMMENT /1(79) cmt6.
+SELECTION-SCREEN END OF BLOCK 001.
+
+SELECTION-SCREEN FUNCTION KEY 1.
+SELECTION-SCREEN FUNCTION KEY 2.
+SELECTION-SCREEN FUNCTION KEY 3.
+SELECTION-SCREEN FUNCTION KEY 4.
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_alv_event_handler DEFINITION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS lcl_alv_event_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      handle_f4             FOR EVENT onf4
+                            OF cl_gui_alv_grid
+                            IMPORTING e_fieldname e_fieldvalue es_row_no er_event_data et_bad_cells.
+ENDCLASS.                    "lcl_alv_event_handler DEFINITION
+
+TYPES:
+  BEGIN OF typ_field,
+    fieldname   TYPE fieldname,
+    ref_table   TYPE lvc_rtname,
+    ref_field   TYPE lvc_rfname,
+    convexit    TYPE convexit,
+    scrtext_l   TYPE scrtext_l,
+    typ_field   TYPE c LENGTH 60,
+    mark        TYPE c LENGTH 60,
+  END OF typ_field.
+
+DATA:
+  go_docking_con        TYPE REF TO cl_gui_docking_container,
+  go_alv_fields         TYPE REF TO cl_gui_alv_grid,
+  go_event_fields       TYPE REF TO lcl_alv_event_handler.
+
+DATA:
+  gt_fields             TYPE TABLE OF typ_field,
+  gs_field              TYPE typ_field.
+
+DATA:
+  gt_fieldcat_fields    TYPE lvc_t_fcat,
+  gs_fieldcat           TYPE lvc_s_fcat,
+  gt_f4_fields          TYPE lvc_t_f4,
+  gs_f4                 TYPE lvc_s_f4,
+  gt_exclude            TYPE ui_functions,
+  gs_layout             TYPE lvc_s_layo.
+
+DATA:
+  ok_code TYPE sy-ucomm,
+  g_flag_error TYPE c,
+  g_indxid TYPE indx_srtfd,
+  gt_codes TYPE TABLE OF string,
+  g_code TYPE string,
+  go_excel TYPE ole2_object,
+  go_books TYPE ole2_object,
+  go_book TYPE ole2_object,
+  go_sheet TYPE ole2_object,
+  go_cell TYPE ole2_object,
+  g_row TYPE i,
+  g_col TYPE i,
+  g_value TYPE string.
+
+DEFINE d_build_fieldcat.
+  gs_fieldcat-fieldname  = &3.
+  gs_fieldcat-checkbox   = &4.
+  gs_fieldcat-f4availabl = &5.
+  gs_fieldcat-outputlen  = &6.
+  gs_fieldcat-ref_table  = &7.
+  gs_fieldcat-ref_field  = &8.
+  gs_fieldcat-coltext    = &9.
+  append gs_fieldcat to &1.
+  clear gs_fieldcat.
+
+  if &5 = 'X'.
+    gs_f4-fieldname = &3.
+    gs_f4-register = 'X'.
+    insert gs_f4 into table &2.
+    clear gs_f4.
+  endif.
+END-OF-DEFINITION.
+
+DEFINE append_code.
+  append &1 to gt_codes.
+END-OF-DEFINITION.
+*----------------------------------------------------------------------*
+*       CLASS lcl_alv_event_handler IMPLEMENTATION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS lcl_alv_event_handler IMPLEMENTATION .
+  METHOD handle_f4.
+    PERFORM handle_f4 USING e_fieldname e_fieldvalue es_row_no er_event_data et_bad_cells.
+  ENDMETHOD.                                                "HANDLE_F4
+ENDCLASS.                    "lcl_alv_event_handler IMPLEMENTATION
+
+INITIALIZATION.
+  sy-title = '自动生成程序系列——自动生成批导程序框架'.
+  title1 = '参数设置'.
+  text1 = '程序(SMW0中模板文件ID与程序名相同)'.
+  text2 = '数据区域的左上角地址'.
+  text3 = '数据区域的右下角地址(可不填)'.
+  text4 = '文件模板名称'.
+  gen = '生成程序'.
+  cmt1 = '说明：'.
+  cmt2 = '1、生成程序前，请手动创建Report类型的程序，并激活'.
+  cmt3 = '2、为使生成的程序可以“下载模板”的功能，请在SMW0中使用与程序名称相同的ID上传Excel模板'.
+  cmt4 = '3、本程序自动COPY标准的ALV GUI状态到生成程序，但需要手动激活'.
+  cmt5 = '4、需要手动为GUI状态STATUS_ALV增加两个按钮IMPORT和ERRORS，用以“导入数据”和“显示错误”'.
+  cmt6 = '5、程序中预留了调用BDC的Form，内有宏代码、示例代码'.
+  sscrfields-functxt_01 = '保存设置'.
+  sscrfields-functxt_02 = '加载设置'.
+  sscrfields-functxt_03 = '下载到Excel'.
+  sscrfields-functxt_04 = '从Excel上载'.
+
+AT SELECTION-SCREEN OUTPUT.
+  CHECK go_docking_con IS INITIAL.
+  "创建容器
+  CREATE OBJECT go_docking_con
+    EXPORTING
+      ratio = 65
+      side  = cl_gui_docking_container=>dock_at_bottom.
+
+  "创建FIELDS的ALV
+  CREATE OBJECT go_alv_fields
+    EXPORTING
+      i_parent = go_docking_con.
+
+  "事件响应
+  CREATE OBJECT go_event_fields.
+  SET HANDLER go_event_fields->handle_f4 FOR go_alv_fields.
+
+  "显示ALV
+  PERFORM alv_prepare_toolbar   TABLES    gt_exclude.
+  PERFORM alv_prepare_layout    CHANGING  gs_layout.
+
+  d_build_fieldcat:
+    gt_fieldcat_fields  gt_f4_fields  'FIELDNAME'  ' '  ' '  15  'DD03L'  'FIELDNAME'    '字段名',
+    gt_fieldcat_fields  gt_f4_fields  'REF_TABLE'  ' '  'X'  16  'DD03L'  'TABNAME'      '参照表',
+    gt_fieldcat_fields  gt_f4_fields  'REF_FIELD'  ' '  'X'  20  'DD03L'  'FIELDNAME'    '参照字段',
+    gt_fieldcat_fields  gt_f4_fields  'CONVEXIT'   ' '  'X'   7  'DD01D'  'CONVEXIT'     '转换例程',
+    gt_fieldcat_fields  gt_f4_fields  'SCRTEXT_L'  ' '  ' '  30  'DD04T'  'SCRTEXT_L'    '字段描述'.
+  gs_layout-grid_title = '字段设置'.
+  CALL METHOD go_alv_fields->set_table_for_first_display
+    EXPORTING
+      it_toolbar_excluding = gt_exclude
+      is_layout            = gs_layout
+    CHANGING
+      it_outtab            = gt_fields
+      it_fieldcatalog      = gt_fieldcat_fields.
+
+  "注册事件
+  go_alv_fields->register_f4_for_fields( EXPORTING it_f4 = gt_f4_fields ).
+  go_alv_fields->register_edit_event( EXPORTING i_event_id = cl_gui_alv_grid=>mc_evt_modified ).
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_prog.
+  PERFORM f4_prog.
+
+AT SELECTION-SCREEN.
+  go_alv_fields->check_changed_data( ).
+
+  g_indxid = p_prog && 'GB'.
+  ok_code = sy-ucomm.
+  CLEAR sy-ucomm.
+  CASE ok_code.
+    WHEN 'FC01'.
+      EXPORT fields = gt_fields TO DATABASE indx(st) ID g_indxid.
+    WHEN 'FC02'.
+      IMPORT fields = gt_fields FROM DATABASE indx(st) ID g_indxid.
+      PERFORM alv_refresh_display.
+    WHEN 'FC03'.
+      PERFORM download.
+    WHEN 'FC04'.
+      PERFORM upload.
+      PERFORM alv_refresh_display.
+    WHEN 'GEN'.
+      PERFORM check.
+      CHECK g_flag_error IS INITIAL.
+      PERFORM process_data.
+      PERFORM generate.
+  ENDCASE.
+
+*&---------------------------------------------------------------------*
+*&      Form  alv_prepare_toolbar
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM alv_prepare_toolbar  TABLES  pt_exclude TYPE ui_functions.
+  REFRESH: pt_exclude.
+
+  APPEND cl_gui_alv_grid=>mc_fc_maximum TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_minimum TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_subtot TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_sum TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_average TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_sum TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_subtot TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_sort_asc TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_sort_dsc TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_find TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_filter TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_print TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_print_prev TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_export TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_graph TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_export TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_view TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_detail TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_help TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_info TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_variant TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_refresh TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_check TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_copy TO pt_exclude.
+*  APPEND cl_gui_alv_grid=>mc_fc_loc_insert_row TO pt_exclude.
+*  APPEND cl_gui_alv_grid=>mc_fc_loc_delete_row TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_copy_row TO pt_exclude.
+*  APPEND cl_gui_alv_grid=>mc_fc_loc_append_row TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_undo TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_cut TO pt_exclude.
+  APPEND cl_gui_alv_grid=>mc_mb_paste TO pt_exclude.
+ENDFORM.                    "alv_prepare_toolbar
+*&---------------------------------------------------------------------*
+*&      Form  alv_prepare_layout
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->PS_LAYOUT  text
+*----------------------------------------------------------------------*
+FORM alv_prepare_layout  CHANGING ps_layout TYPE lvc_s_layo.
+  ps_layout-zebra = 'X'.
+  ps_layout-sel_mode = 'A'.
+  ps_layout-smalltitle = 'X'.
+  ps_layout-edit = 'X'.
+ENDFORM.                    "alv_prepare_layout
+*&---------------------------------------------------------------------*
+*&      Form  handle_f4
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM handle_f4  USING           e_fieldname TYPE lvc_fname
+                                e_fieldvalue TYPE lvc_value
+                                es_row_no TYPE lvc_s_roid
+                                er_event_data TYPE REF TO cl_alv_event_data
+                                et_bad_cells TYPE lvc_t_modi.
+  DATA: ls_row TYPE lvc_s_row,
+        ls_col TYPE lvc_s_col,
+        ls_modi TYPE lvc_s_modi,
+        l_tabname TYPE tabname,
+        l_fieldtext TYPE fieldtext,
+        l_convexit TYPE convexit.
+  FIELD-SYMBOLS: <lt_modi> TYPE lvc_t_modi.
+
+  er_event_data->m_event_handled = 'X'.
+
+  CASE e_fieldname.
+    WHEN 'REF_TABLE'.
+      PERFORM f4_dd_table(rsaqddic) USING 'SAPLAQJD_CNTRL'
+                                          '0300'
+                                          'G_DYN_0300-TNAME'
+                                    CHANGING e_fieldvalue.  "搜索帮助代码，来于SQVI中“插入表”的搜索帮助
+
+    WHEN 'REF_FIELD'.
+      READ TABLE gt_fields INDEX es_row_no-row_id INTO gs_field.
+      CHECK gs_field-ref_table IS NOT INITIAL.
+      l_tabname = gs_field-ref_table.
+      l_fieldtext = gs_field-scrtext_l.
+      l_convexit = gs_field-convexit.
+
+      PERFORM f4_field USING l_tabname CHANGING e_fieldvalue l_fieldtext l_convexit.
+
+    WHEN 'CONVEXIT'.
+      PERFORM f4_convexit CHANGING e_fieldvalue.
+
+    WHEN OTHERS.
+      EXIT.
+  ENDCASE.
+
+  ASSIGN er_event_data->m_data->* TO <lt_modi>.
+  ls_modi-row_id    = es_row_no-row_id."
+  ls_modi-fieldname = e_fieldname.
+  ls_modi-value     = e_fieldvalue.
+  APPEND ls_modi TO <lt_modi>.
+  IF e_fieldname = 'REF_FIELD'.
+    ls_modi-row_id    = es_row_no-row_id."
+    ls_modi-fieldname = 'SCRTEXT_L'.
+    ls_modi-value     = l_fieldtext.
+    APPEND ls_modi TO <lt_modi>.
+
+    ls_modi-row_id    = es_row_no-row_id."
+    ls_modi-fieldname = 'CONVEXIT'.
+    ls_modi-value     = l_convexit.
+    APPEND ls_modi TO <lt_modi>.
+  ENDIF.
+
+ENDFORM.                                                    "handle_f4
+*&---------------------------------------------------------------------*
+*&      Form  F4_PROG
+*&---------------------------------------------------------------------*
+*       程序名称的搜索帮助（同SE38）
+*----------------------------------------------------------------------*
+FORM f4_prog .
+  DATA: lt_dynpfields TYPE TABLE OF dynpread WITH HEADER LINE.
+
+  lt_dynpfields-fieldname  = 'P_PROG'.
+  APPEND lt_dynpfields.
+
+  CALL FUNCTION 'DYNP_VALUES_READ'
+    EXPORTING
+      dyname     = sy-repid
+      dynumb     = sy-dynnr
+    TABLES
+      dynpfields = lt_dynpfields[].
+
+  READ TABLE lt_dynpfields INDEX 1.
+  p_prog = lt_dynpfields-fieldvalue.
+
+  CALL FUNCTION 'REPOSITORY_INFO_SYSTEM_F4'
+    EXPORTING
+      object_type          = 'PROG'
+      object_name          = p_prog
+      suppress_selection   = 'X'
+    IMPORTING
+      object_name_selected = p_prog
+    EXCEPTIONS
+      cancel               = 01.
+ENDFORM.                                                    " F4_PROG
+*&---------------------------------------------------------------------*
+*&      Form  PROCESS_DATA
+*&---------------------------------------------------------------------*
+*       处理数据
+*----------------------------------------------------------------------*
+FORM process_data .
+  LOOP AT gt_fields INTO gs_field.
+    IF gs_field-ref_table IS INITIAL.
+      gs_field-typ_field = gs_field-ref_field.
+    ELSE.
+      gs_field-typ_field = gs_field-ref_table && '-' && gs_field-ref_field.
+    ENDIF.
+    CONCATENATE '          "' gs_field-scrtext_l INTO gs_field-mark.
+    MODIFY gt_fields FROM gs_field TRANSPORTING typ_field mark.
+  ENDLOOP.
+ENDFORM.                    " PROCESS_DATA
+
+*&---------------------------------------------------------------------*
+*&      Form  generate
+*&---------------------------------------------------------------------*
+*       生成程序
+*----------------------------------------------------------------------*
+FORM generate.
+  DATA: l_rc(5).
+  REFRESH gt_codes.
+
+  CHECK p_prog(1) = 'Y' OR p_prog(1) = 'Z'.
+
+  IF strlen( p_prog ) > 20.
+    MESSAGE '程序名长度不能超过20' TYPE 'E' DISPLAY LIKE 'I'.  "主要是因为EXPORT TO DATABASE时INDXID的长度为22位的限制
+  ENDIF.
+
+  SELECT SINGLE progname INTO p_prog FROM reposrc WHERE progname = p_prog.
+  IF sy-subrc = 0.
+*    MESSAGE '程序已经存在' TYPE 'E' DISPLAY LIKE 'I'.
+  ENDIF.
+
+  "程序名
+  PERFORM gen_report_name.
+  "TYPE-POOLS、TABLES等
+  PERFORM gen_includes.
+  "SELECTION-SCREEN
+  PERFORM gen_selection_screen.
+  "类型定义
+  PERFORM gen_types.
+  "数据定义
+  PERFORM gen_data_defination.
+  "宏定义
+  PERFORM gen_macro_defination.
+  "初始化
+  PERFORM gen_initialization.
+  "AT SELECTION-SCREEN
+  PERFORM gen_at_selection_screen.
+  "START-OF-SELECTION
+  PERFORM gen_start_of_selection.
+  "FORM CHECK_AUTH
+  PERFORM gen_form_check_auth.
+  "FORM UPLOAD_DATA
+  PERFORM gen_form_upload_data.
+  "FORM CHECK_DATA
+  PERFORM gen_form_check_data.
+  "FORM SELECT_EXCEL_FILE
+  PERFORM gen_form_select_excel_file.
+  "FORM SET_STATUS_BAR
+  PERFORM gen_form_set_status_bar.
+  "FORM DOWNLOAD_TEMPLATE
+  PERFORM gen_form_download_template.
+  "FORM DISPLAY_DATA
+  PERFORM gen_form_display_data.
+  "FORM PF_STATUS_ALV
+  PERFORM gen_form_pf_status_alv.
+  "FORM USER_COMMAND_ALV
+  PERFORM gen_form_user_command_alv.
+  "FORM CALL_BDC
+  PERFORM gen_form_call_bdc.
+
+  INSERT REPORT p_prog FROM gt_codes.
+
+  PERFORM copy_status_diff_progs_new IN PROGRAM saplsmpe IF FOUND
+    USING 'X' 'SAPLKKBL' p_prog 'STANDARD_FULLSCREEN' 'STATUS_ALV'
+    CHANGING l_rc.
+ENDFORM.                    "GENERATE
+*&---------------------------------------------------------------------*
+*&      Form  GEN_REPORT_NAME
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_report_name .
+  CONCATENATE 'REPORT' p_prog INTO g_code SEPARATED BY space.
+  g_code = g_code && '.'.
+  append_code: g_code, ''.
+ENDFORM.                    " GEN_REPORT_NAME
+*&---------------------------------------------------------------------*
+*&      Form  GEN_INCLUDES
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_includes .
+  append_code:
+    'TYPE-POOLS:OLE2.    ',
+    '                    ',
+    'TABLES: SSCRFIELDS. ',
+    '                    '.
+ENDFORM.                    " GEN_INCLUDES
+*&---------------------------------------------------------------------*
+*&      Form  GEN_SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_selection_screen .
+  append_code:
+    'SELECTION-SCREEN BEGIN OF BLOCK 001 WITH FRAME TITLE TITLE1.       ',
+    'PARAMETERS P_FILE TYPE C LENGTH 1024 LOWER CASE.                   ',
+    'SELECTION-SCREEN END OF BLOCK 001.                                 ',
+    'SELECTION-SCREEN FUNCTION KEY 1.                                   ',
+    '                                                                   '.
+ENDFORM.                    " GEN_SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+*&      Form  GEN_TYPES
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_types .
+  DATA: l_mark TYPE c LENGTH 60.
+
+  append_code:
+    'TYPES:',
+    '  BEGIN OF TY_EXCEL,'.
+  LOOP AT gt_fields INTO gs_field.
+    CONCATENATE gs_field-fieldname 'TYPE' gs_field-typ_field INTO g_code SEPARATED BY space.
+    CONCATENATE g_code ',' gs_field-mark INTO g_code.
+    SHIFT g_code RIGHT BY 4 PLACES.
+    append_code g_code.
+  ENDLOOP.
+
+  append_code:
+    '  END OF TY_EXCEL,                  ',
+    '                                    ',
+    '  BEGIN OF TY_ALV,                  ',
+    '    SEL TYPE C.                     ',
+    '        INCLUDE TYPE TY_EXCEL.      ',
+    'TYPES:                              ',
+    '  END OF TY_ALV.                    ',
+    '                                    '.
+ENDFORM.                    " GEN_TYPES
+*&---------------------------------------------------------------------*
+*&      Form  GEN_DATA_DEFINATION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_data_defination .
+  append_code:
+    'DATA: GT_FIELDCAT TYPE LVC_T_FCAT,                    ',
+    '      GS_FIELDCAT TYPE LVC_S_FCAT,                    ',
+    '      GS_LAYOUT TYPE LVC_S_LAYO,                      ',
+    '      G_OBJID LIKE WWWDATA-OBJID VALUE SY-REPID,      ',
+    '      GS_EXCEL TYPE TY_EXCEL,                         ',
+    '      GT_EXCEL TYPE TABLE OF TY_EXCEL,                ',
+    '      GS_ALV TYPE TY_ALV,                             ',
+    '      GT_ALV TYPE TABLE OF TY_ALV.                    ',
+    '                                                      '.
+ENDFORM.                    " GEN_DATA_DEFINATION
+*&---------------------------------------------------------------------*
+*&      Form  gen_macro_defination
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_macro_defination .
+  append_code:
+    'DEFINE D_BUILD_FIELDCAT.                         ',
+    '  GS_FIELDCAT-FIELDNAME     = &1.                ',
+    '  GS_FIELDCAT-QFIELDNAME    = &2.                ',
+    '  GS_FIELDCAT-CFIELDNAME    = &3.                ',
+    '  GS_FIELDCAT-REF_TABLE     = &4.                ',
+    '  GS_FIELDCAT-REF_FIELD     = &5.                ',
+    '  GS_FIELDCAT-CONVEXIT      = &6.                ',
+    '  GS_FIELDCAT-EMPHASIZE     = &7.                ',
+    '  GS_FIELDCAT-SCRTEXT_L     = &8.                ',
+    '  GS_FIELDCAT-COLDDICTXT    = ''L''.             ',
+    '  APPEND GS_FIELDCAT TO GT_FIELDCAT.             ',
+    '  CLEAR: GS_FIELDCAT.                            ',
+    'END-OF-DEFINITION.                               ',
+    '                                                 '.
+ENDFORM.                    "gen_macro_defination
+*&---------------------------------------------------------------------*
+*&      Form  GEN_INITIALIZATION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_initialization .
+  append_code:
+    'INITIALIZATION.                                            ',
+    '  TITLE1 = ''选择条件''.                                   ',
+    '  %_P_FILE_%_APP_%-TEXT = ''选择文件''.                    ',
+    '  SSCRFIELDS-FUNCTXT_01 = ''@49@下载模板''.                ',
+    '                                                           '.
+ENDFORM.                    " GEN_INITIALIZATION
+*&---------------------------------------------------------------------*
+*&      Form  GEN_AT_SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_at_selection_screen .
+  append_code:
+    'AT SELECTION-SCREEN ON VALUE-REQUEST FOR P_FILE.                                         ',
+    '  PERFORM SELECT_EXCEL_FILE CHANGING P_FILE.                                             ',
+    '                                                                                         ',
+    'AT SELECTION-SCREEN.                                                                     ',
+    '  CASE SSCRFIELDS-UCOMM.                                                                 ',
+    '    WHEN ''FC01''.                                                                       '.
+  CONCATENATE '      PERFORM DOWNLOAD_TEMPLATE USING G_OBJID ''XLS'' ''' p_fname '''.' INTO g_code.
+  append_code g_code.
+  append_code:
+    '  ENDCASE.                                                                               ',
+    '                                                                                         ',
+    '  "检查权限                                                                                  ',
+    '  PERFORM CHECK_AUTH.                                                                    ',
+    '                                                                                         '.
+ENDFORM.                    "GEN_AT_SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+*&      Form  GEN_START_OF_SELECTION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_start_of_selection .
+  append_code:
+    'START-OF-SELECTION.                                                                  ',
+    '  IF P_FILE IS INITIAL.                                                              ',
+    '    MESSAGE ''请选择文件'' TYPE ''S''.                                               ',
+    '    LEAVE LIST-PROCESSING.                                                           ',
+    '  ENDIF.                                                                             ',
+    '                                                                                     ',
+    '  "读取文件                                                                          '.
+  CONCATENATE '  PERFORM UPLOAD_DATA USING ''' p_addr1 '''  ''' p_addr2 '''.  "数据开始的单元格，可根据实际情况更改' INTO g_code.
+  append_code g_code.
+  append_code:
+    '  PERFORM CHECK_DATA.                                                                ',
+    '  PERFORM DISPLAY_DATA.                                                              ',
+    '                                                                                     '.
+ENDFORM.                    " GEN_START_OF_SELECTION
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_CHECK_AUTH
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_check_auth.
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  CHECK_AUTH                                                ',
+    '*&---------------------------------------------------------------------*',
+    '*       检查权限                                                        ',
+    '*----------------------------------------------------------------------*',
+    'FORM CHECK_AUTH.                                                        ',
+    '*  AUTHORITY-CHECK OBJECT ''M_BANF_WRK''                                ',
+    '*           ID ''ACTVT'' FIELD ''01''                                   ',
+    '*           ID ''WERKS'' FIELD P_WERKS.                                 ',
+    '*  IF SY-SUBRC <> 0.                                                    ',
+    '*    MESSAGE ''您没有该工厂的操作权限'' TYPE ''E''.                     ',
+    '*  ENDIF.                                                               ',
+    'ENDFORM.                    "CHECK_AUTH                                 '.
+ENDFORM.                    "GEN_FORM_CHECK_AUTH
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_UPLOAD_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_upload_data .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  UPLOAD_DATA                                               ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM UPLOAD_DATA USING P_TOP_LEFT_ADDR TYPE STRING                      ',
+    '                       P_BOTTOM_RIGHT_ADDR TYPE STRING.                 ',
+    '                                                                        ',
+    '  DATA: BEGIN OF LT_LINES OCCURS 0,                                     ',
+    '          ROW(4096) TYPE C,                                             ',
+    '        END OF LT_LINES,                                                ',
+    '        BEGIN OF LT_FIELDS OCCURS 0,                                    ',
+    '          VALUE(500) TYPE C,                                            ',
+    '        END OF LT_FIELDS,                                               ',
+    '        LO_EXCEL TYPE OLE2_OBJECT,                                      ',
+    '        LO_BOOKS TYPE OLE2_OBJECT,                                      ',
+    '        LO_BOOK TYPE OLE2_OBJECT,                                       ',
+    '        LO_SHEET TYPE OLE2_OBJECT,                                      ',
+    '        LO_USEDRANGE TYPE OLE2_OBJECT,                                  ',
+    '        LO_USEDROWS TYPE OLE2_OBJECT,                                   ',
+    '        LO_USEDCOLS TYPE OLE2_OBJECT,                                   ',
+    '        LO_CELL_BOTTOM_RIGHT TYPE OLE2_OBJECT,                          ',
+    '        LO_RANGE TYPE OLE2_OBJECT,                                      ',
+    '        LO_CELL_TOP_LEFT TYPE OLE2_OBJECT,                              ',
+    '        L_TOPROW TYPE I,                                                ',
+    '        L_LEFTCOL TYPE I,                                               ',
+    '        L_USEDROWS TYPE I,                                              ',
+    '        L_USEDCOLS TYPE I,                                              ',
+    '        L_MAXROW TYPE I,                                                ',
+    '        L_MAXCOL TYPE I,                                                ',
+    '        L_ADDR TYPE STRING,                                             ',
+    '        L_ROWINDEX TYPE STRING,                                         ',
+    '        L_COUNT TYPE STRING,                                            ',
+    '        L_MSG TYPE STRING.                                              ',
+    '  FIELD-SYMBOLS <L_FIELDVALUE> TYPE ANY.                                ',
+    '                                                                        ',
+    '  "创建EXCEL程序                                                        ',
+    '  CREATE OBJECT LO_EXCEL ''EXCEL.APPLICATION''.                         ',
+    '  IF SY-SUBRC <> 0.                                                     ',
+    '    MESSAGE ''创建EXCEL APPLICATION失败！'' TYPE ''S'' DISPLAY LIKE ''E''.',
+    '    LEAVE LIST-PROCESSING.                                              ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  "打开EXCEL文件                                                        ',
+    '  GET PROPERTY OF LO_EXCEL ''WORKBOOKS'' = LO_BOOKS.                    ',
+    '  CALL METHOD OF LO_BOOKS ''OPEN'' = LO_BOOK                            ',
+    '    EXPORTING                                                           ',
+    '      #1       = P_FILE.                                                ',
+    '  IF SY-SUBRC <> 0.                                                     ',
+    '    MESSAGE ''打开EXCEL文件失败！'' TYPE ''S'' DISPLAY LIKE ''E''.      ',
+    '    LEAVE LIST-PROCESSING.                                              ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  "取最大行和最大列                                                     ',
+    '  GET PROPERTY OF LO_EXCEL ''ACTIVESHEET'' = LO_SHEET.                  ',
+    '  GET PROPERTY OF LO_SHEET ''USEDRANGE'' = LO_USEDRANGE.                ',
+    '  GET PROPERTY OF LO_USEDRANGE ''ROW'' = L_TOPROW.                      ',
+    '  GET PROPERTY OF LO_USEDRANGE ''COLUMN'' = L_LEFTCOL.                  ',
+    '  GET PROPERTY OF LO_USEDRANGE ''ROWS'' = LO_USEDROWS.                  ',
+    '  GET PROPERTY OF LO_USEDROWS ''COUNT'' = L_USEDROWS.                   ',
+    '  GET PROPERTY OF LO_USEDRANGE ''COLUMNS'' = LO_USEDCOLS.               ',
+    '  GET PROPERTY OF LO_USEDCOLS ''COUNT'' = L_USEDCOLS.                   ',
+    '  L_MAXROW = L_TOPROW + L_USEDROWS - 1.                                 ',
+    '  L_MAXCOL = L_LEFTCOL + L_USEDCOLS - 1.                                ',
+    '                                                                        ',
+    '  "确定数据范围                                                         ',
+    '  IF P_BOTTOM_RIGHT_ADDR IS INITIAL.                                    ',
+    '    GET PROPERTY OF LO_SHEET ''CELLS'' = LO_CELL_BOTTOM_RIGHT           ',
+    '      EXPORTING                                                         ',
+    '        #1       = L_MAXROW                                             ',
+    '        #2       = L_MAXCOL.                                            ',
+    '    GET PROPERTY OF LO_SHEET ''RANGE'' = LO_RANGE                       ',
+    '      EXPORTING                                                         ',
+    '        #1       = P_TOP_LEFT_ADDR                                      ',
+    '        #2       = LO_CELL_BOTTOM_RIGHT.                                ',
+    '  ELSE.                                                                 ',
+    '    GET PROPERTY OF LO_SHEET ''RANGE'' = LO_RANGE                       ',
+    '      EXPORTING                                                         ',
+    '        #1       = P_TOP_LEFT_ADDR                                      ',
+    '        #2       = P_BOTTOM_RIGHT_ADDR.                                 ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  "检查是否存在数据                                                     ',
+    '  GET PROPERTY OF LO_RANGE ''ROW'' = L_TOPROW.                          ',
+    '  GET PROPERTY OF LO_RANGE ''COLUMN'' = L_LEFTCOL.                      ',
+    '  GET PROPERTY OF LO_SHEET ''CELLS'' = LO_CELL_TOP_LEFT                 ',
+    '    EXPORTING                                                           ',
+    '      #1       = L_TOPROW                                               ',
+    '      #2       = L_LEFTCOL.                                             ',
+    '  GET PROPERTY OF LO_CELL_TOP_LEFT ''ADDRESS'' = L_ADDR                 ',
+    '    EXPORTING                                                           ',
+    '      #1 = 0                                                            ',
+    '      #2 = 0.                                                           ',
+    '  IF L_ADDR <> P_TOP_LEFT_ADDR. "无数据                                 ',
+    '    CALL METHOD OF LO_BOOK ''CLOSE''.                                   ',
+    '    CALL METHOD OF LO_EXCEL ''QUIT''.                                   ',
+    '    MESSAGE ''文件中无有效数据！'' TYPE ''S'' DISPLAY LIKE ''E''.       ',
+    '    LEAVE LIST-PROCESSING.                                              ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  "替换CHR(13)+CHR(10) WITH CHR(10) 【CHR(13)属于EXCEL单元格内容中的非正常输入字符，必会导致ABAP内表数据串行】',
+    '  SET PROPERTY OF LO_EXCEL ''DISPLAYALERTS'' = 0.                       ',
+    '  CALL METHOD OF LO_RANGE ''REPLACE''                                   ',
+    '    EXPORTING                                                           ',
+    '      #1        = CL_ABAP_CHAR_UTILITIES=>CR_LF             "000D000A CHR(13) + CHR(10)',
+    '      #2        = CL_ABAP_CHAR_UTILITIES=>NEWLINE.          "000A CHR(10)',
+    '                                                                        ',
+    '  "复制数据                                                             ',
+    '  CALL METHOD OF LO_RANGE ''COPY''.                                     ',
+    '  CALL METHOD CL_GUI_FRONTEND_SERVICES=>CLIPBOARD_IMPORT                ',
+    '    IMPORTING                                                           ',
+    '      DATA   = LT_LINES[]                                               ',
+    '    EXCEPTIONS                                                          ',
+    '      OTHERS = 1.                                                       ',
+    '                                                                        ',
+    '  "关闭EXCEL                                                            ',
+    '  CALL METHOD OF LO_BOOK ''CLOSE''.                                     ',
+    '  CALL METHOD OF LO_EXCEL ''QUIT''.                                     ',
+    '                                                                        ',
+    '  "拆分数据                                                             ',
+    '  LOOP AT LT_LINES.                                                     ',
+    '    L_ROWINDEX = SY-TABIX + L_TOPROW - 1.                               ',
+    '    SPLIT LT_LINES-ROW AT CL_ABAP_CHAR_UTILITIES=>HORIZONTAL_TAB INTO TABLE LT_FIELDS.',
+    '    LOOP AT LT_FIELDS.                                                  ',
+    '      L_COUNT = SY-TABIX.                                               ',
+    '      ASSIGN COMPONENT SY-TABIX OF STRUCTURE GS_EXCEL TO <L_FIELDVALUE>.',
+    '      CHECK SY-SUBRC = 0.                                               ',
+    '      CATCH SYSTEM-EXCEPTIONS CONVT_NO_NUMBER = 1 OTHERS = 2.           ',
+    '        <L_FIELDVALUE> = LT_FIELDS-VALUE.                               ',
+    '      ENDCATCH.                                                         ',
+    '      IF SY-SUBRC <> 0.                                                 ',
+    '        CONCATENATE ''第'' L_ROWINDEX ''行中第'' L_COUNT ''个字段的值'' GS_FIELDCAT-FIELDNAME ''在格式转换时出错，请检查！'' INTO L_MSG.',
+    '        MESSAGE L_MSG TYPE ''S'' DISPLAY LIKE ''E''.                    ',
+    '        LEAVE LIST-PROCESSING.                                          ',
+    '      ENDIF.                                                            ',
+    '      UNASSIGN <L_FIELDVALUE>.                                          ',
+    '    ENDLOOP.                                                            ',
+    '                                                                        ',
+    '    APPEND GS_EXCEL TO GT_EXCEL.                                        ',
+    '    CLEAR GS_EXCEL.                                                     ',
+    '  ENDLOOP.                                                              ',
+    'ENDFORM.                    "UPLOAD_DATA                                '.
+ENDFORM.                    " GEN_FORM_UPLOAD_DATA
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_CHECK_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_check_data .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  CHECK_DATA                                                ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM CHECK_DATA.                                                        ',
+    '  DATA: L_FLAG TYPE C,                                                  ',
+    '        L_TABIX TYPE I,                                                 ',
+    '        L_MSG TYPE STRING,                                              ',
+    '        L_VALUE TYPE STRING,                                            ',
+    '        L_INDEX TYPE I VALUE 1.                                         ',
+    '                                                                        ',
+    '  DEFINE D_STORE_MESSAGE.                                               ',
+    '    L_FLAG = ''X''.                                                     ',
+    '    CALL FUNCTION ''MESSAGE_STORE''                                     ',
+    '      EXPORTING                                                         ',
+    '        ARBGB = &1                                                      ',
+    '        MSGTY = &2                                                      ',
+    '        TXTNR = &3                                                      ',
+    '        MSGV1 = &4                                                      ',
+    '        MSGV2 = &5                                                      ',
+    '        MSGV3 = &6                                                      ',
+    '        MSGV4 = &7                                                      ',
+    '        ZEILE = L_INDEX.                                                ',
+    '    L_INDEX = L_INDEX + 1.                                              ',
+    '  END-OF-DEFINITION.                                                    ',
+    '                                                                        ',
+    '  CALL FUNCTION ''MESSAGES_INITIALIZE''.                                ',
+    '                                                                        ',
+    '  LOOP AT GT_EXCEL INTO GS_EXCEL.                                       '.
+
+  LOOP AT gt_fields INTO gs_field.
+    CHECK gs_field-convexit IS NOT INITIAL.
+    CONCATENATE '    "' gs_field-scrtext_l '-转码' INTO g_code.
+    append_code g_code.
+    CONCATENATE '    CALL FUNCTION ''CONVERSION_EXIT_' gs_field-convexit '_INPUT''' INTO g_code.
+    append_code g_code.
+    append_code '      EXPORTING'.
+    CONCATENATE '        INPUT        = GS_EXCEL-' gs_field-fieldname INTO g_code.
+    append_code g_code.
+    append_code:
+      '      IMPORTING                ',
+      '        OUTPUT       = L_VALUE ',
+      '      EXCEPTIONS               ',
+      '        LENGTH_ERROR = 1       ',
+      '        OTHERS       = 2.      ',
+      '    IF SY-SUBRC <> 0.          ',
+      '    ENDIF.                     ',
+      '                               '.
+  ENDLOOP.
+
+  append_code:
+    '*    示例                                                               ',
+    '*    L_MSG = ''第'' && L_TABIX && ''行的采购申请编码不能为空''.         ',
+    '*    D_STORE_MESSAGE: ''00'' ''E'' ''001'' L_MSG '''' '''' ''''.        ',
+    '                                                                        ',
+    '    MOVE-CORRESPONDING GS_EXCEL TO GS_ALV.                              ',
+    '    APPEND GS_ALV TO GT_ALV.                                            ',
+    '    CLEAR GS_ALV.                                                       ',
+    '  ENDLOOP.                                                              ',
+    '                                                                        ',
+    '  IF L_FLAG = ''X''.                                                    ',
+    '    CALL FUNCTION ''MESSAGES_SHOW''.                                    ',
+    '    LEAVE LIST-PROCESSING.                                              ',
+    '  ENDIF.                                                                ',
+    'ENDFORM.                    "CHECK_DATA                                 '.
+ENDFORM.                    "GEN_FORM_CHECK_DATA                         ',
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_SELECT_EXCEL_FILE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_select_excel_file .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  SELECT_EXCEL_FILE                                         ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM SELECT_EXCEL_FILE CHANGING P_FILE.                                 ',
+    '  DATA: LT_FILETABLE TYPE FILETABLE WITH HEADER LINE,                   ',
+    '        L_RC TYPE I,                                                    ',
+    '        L_ACTION TYPE I.                                                ',
+    '                                                                        ',
+    '  CALL METHOD CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG                ',
+    '    EXPORTING                                                           ',
+    '      DEFAULT_EXTENSION = ''XLS''                                       ',
+    '      DEFAULT_FILENAME  = ''*.XLS;*.XLSX''                              ',
+    '      FILE_FILTER       = ''EXCEL FILE (*.XLS;*.XLSX)''                 ',
+    '      MULTISELECTION    = ''''                                          ',
+    '    CHANGING                                                            ',
+    '      FILE_TABLE        = LT_FILETABLE[]                                ',
+    '      RC                = L_RC                                          ',
+    '      USER_ACTION       = L_ACTION                                      ',
+    '    EXCEPTIONS                                                          ',
+    '      OTHERS            = 1.                                            ',
+    '  IF L_ACTION NE 0.                                                     ',
+    '    EXIT.                                                               ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  READ TABLE LT_FILETABLE INDEX 1.                                      ',
+    '  P_FILE = LT_FILETABLE-FILENAME.                                       ',
+    'ENDFORM.                    "SELECT_EXCEL_FILE                          '.
+ENDFORM.                    " GEN_FORM_SELECT_EXCEL_FILE
+*&---------------------------------------------------------------------*
+*&      Form  gen_form_set_status_bar
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_set_status_bar.
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  SET_STATUS_BAR                                            ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM SET_STATUS_BAR USING P_PERCENT P_MESSAGE.                          ',
+    '  CALL FUNCTION ''SAPGUI_PROGRESS_INDICATOR''                           ',
+    '    EXPORTING                                                           ',
+    '      PERCENTAGE = P_PERCENT                                            ',
+    '      TEXT       = P_MESSAGE.                                           ',
+    'ENDFORM.                    "SET_STATUS_BAR                             '.
+ENDFORM.                    "gen_form_set_status_bar                     ',
+*&---------------------------------------------------------------------*
+*&      Form  gen_form_download_template
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_download_template.
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  DOWNLOAD_TEMPLATE                                         ',
+    '*&---------------------------------------------------------------------*',
+    '*       下载模板用                                                      ',
+    '*       P_OBJID: SMW0中的文件ID                                         ',
+    '*       P_EXTENSION: 文件扩展名，如XLS、DOC                             ',
+    '*       P_DEFAULT_FILENAME: 默认文件名                                  ',
+    '*----------------------------------------------------------------------*',
+    'FORM DOWNLOAD_TEMPLATE USING P_OBJID P_EXTENSION P_DEFAULT_FILENAME.    ',
+    '  DATA: L_FILENAME     TYPE STRING,                                     ',
+    '        L_FULLPATH     TYPE STRING,                                     ',
+    '        L_PATH         TYPE STRING,                                     ',
+    '        LS_OBJDATA     TYPE WWWDATATAB,                                 ',
+    '        L_DESTINATION  TYPE RLGRAP-FILENAME,                            ',
+    '        L_RC           TYPE I.                                          ',
+    '                                                                        ',
+    '  SELECT SINGLE RELID OBJID INTO CORRESPONDING FIELDS OF LS_OBJDATA FROM WWWDATA WHERE SRTF2 = 0 AND RELID = ''MI'' AND OBJID = P_OBJID.',
+    '  IF SY-SUBRC <> 0.                                                     ',
+    '    MESSAGE ''模板文件不存在'' TYPE ''E''.                              ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  CALL METHOD CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG                ',
+    '    EXPORTING                                                           ',
+    '      DEFAULT_EXTENSION = P_EXTENSION                                   ',
+    '      DEFAULT_FILE_NAME = P_DEFAULT_FILENAME                            ',
+    '    CHANGING                                                            ',
+    '      FILENAME          = L_FILENAME                                    ',
+    '      PATH              = L_PATH                                        ',
+    '      FULLPATH          = L_FULLPATH                                    ',
+    '    EXCEPTIONS                                                          ',
+    '      OTHERS            = 1.                                            ',
+    '  IF L_FULLPATH = ''''.                                                 ',
+    '    MESSAGE ''没有选择文件'' TYPE ''E''.                                ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  IF STRLEN( L_FULLPATH ) > 128.                                        ',
+    '    MESSAGE ''文件名长度超出128，请重新选择文件'' TYPE ''S'' DISPLAY LIKE ''E''.',
+    '    STOP.                                                               ',
+    '  ENDIF.                                                                ',
+    '                                                                        ',
+    '  L_DESTINATION = L_FULLPATH.                                           ',
+    '  CALL FUNCTION ''DOWNLOAD_WEB_OBJECT''                                 ',
+    '    EXPORTING                                                           ',
+    '      KEY         = LS_OBJDATA                                          ',
+    '      DESTINATION = L_DESTINATION                                       ',
+    '    IMPORTING                                                           ',
+    '      RC          = L_RC.                                               ',
+    '  IF L_RC <> 0.                                                         ',
+    '    MESSAGE ''导入模板下载失败'' TYPE ''E''.                            ',
+    '  ENDIF.                                                                ',
+    'ENDFORM.                    "DOWNLOAD_TEMPLATE                          '.
+ENDFORM.                    "gen_form_download_template
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_DISPLAY_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_display_data .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  DISPLAY_DATA                                              ',
+    '*&---------------------------------------------------------------------*',
+    '*       显示数据                                                        ',
+    '*----------------------------------------------------------------------*',
+    'FORM DISPLAY_DATA.                                                      ',
+    '  D_BUILD_FIELDCAT:                                                     ',
+    '*     字段     单位字段  金额字段   参照表    参照字段      转码     列颜色      描述'.
+
+  LOOP AT gt_fields INTO gs_field.
+    IF sy-tabix = lines( gt_fields ).
+      g_code = '.'.
+    ELSE.
+      g_code = ','.
+    ENDIF.
+
+    CONCATENATE '    ''' gs_field-fieldname '''   '''   '''   '''   '''    '''
+      gs_field-ref_table '''    ''' gs_field-ref_field '''      ''' gs_field-convexit '''   '''    '''  '''
+      gs_field-scrtext_l ''''
+      g_code
+      INTO g_code.
+    append_code g_code.
+  ENDLOOP.
+
+  append_code ''.
+
+  "LAYOUT
+  append_code:
+    '  GS_LAYOUT-CWIDTH_OPT = ''X''.',
+    '  GS_LAYOUT-BOX_FNAME = ''SEL''.',
+    ''.
+
+  append_code:
+    '  CALL FUNCTION ''REUSE_ALV_GRID_DISPLAY_LVC''        ',
+    '    EXPORTING                                         ',
+    '      I_CALLBACK_PROGRAM       = SY-REPID             ',
+    '      I_CALLBACK_PF_STATUS_SET = ''PF_STATUS''        ',
+    '      I_CALLBACK_USER_COMMAND  = ''USER_COMMAND''     ',
+    '      IT_FIELDCAT_LVC          = GT_FIELDCAT          ',
+    '      IS_LAYOUT_LVC            = GS_LAYOUT            ',
+    '      I_DEFAULT                = ''X''                ',
+    '      I_SAVE                   = ''A''                ',
+    '    TABLES                                            ',
+    '      T_OUTTAB                 = GT_ALV               ',
+    '    EXCEPTIONS                                        ',
+    '      OTHERS                   = 1.                   '.
+  "ALV展示
+  append_code 'ENDFORM.                    "DISPLAY_DATA'.
+ENDFORM.                    " GEN_FORM_DISPLAY_DATA
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_PF_STATUS_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_pf_status_alv .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  PF_STATUS                                                 ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM PF_STATUS USING RT_EXTAB TYPE SLIS_T_EXTAB .                       ',
+    '  SET PF-STATUS ''STATUS_ALV'' EXCLUDING RT_EXTAB.                      ',
+    'ENDFORM.                    "PF_STATUS                                  '.
+ENDFORM.                    " GEN_FORM_PF_STATUS_ALV
+*&---------------------------------------------------------------------*
+*&      Form  GEN_FORM_USER_COMMAND_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_user_command_alv .
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  USER_COMMAND                                             ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM USER_COMMAND USING R_UCOMM     LIKE SY-UCOMM                       ',
+    '                        RS_SELFIELD TYPE SLIS_SELFIELD.                 ',
+    '  CASE R_UCOMM.                                                         ',
+    '    WHEN ''IMPORT''.                                                    ',
+    '      READ TABLE GT_ALV WITH KEY SEL = ''X'' TRANSPORTING NO FIELDS.    ',
+    '      IF SY-SUBRC <> 0.                                                 ',
+    '        MESSAGE ''请至少选择一个行项目'' TYPE ''S'' DISPLAY LIKE ''E''. ',
+    '        EXIT.                                                           ',
+    '      ENDIF.                                                            ',
+    '                                                                        ',
+    '      CALL FUNCTION ''MESSAGES_INITIALIZE''.                            ',
+    '                                                                        ',
+    '      "准备数据进行批导                                                 ',
+    '      LOOP AT GT_ALV INTO GS_ALV WHERE SEL = ''X''.                     ',
+    '                                                                        ',
+    '      ENDLOOP.                                                          ',
+    '                                                                        ',
+    '    WHEN ''ERRORS''.                                                    ',
+    '      CALL FUNCTION ''MESSAGES_SHOW''.                                  ',
+    '  ENDCASE.                                                              ',
+    'ENDFORM.                    "USER_COMMAND                               '.
+ENDFORM.                    " GEN_FORM_USER_COMMAND_ALV
+*&---------------------------------------------------------------------*
+*&      Form  gen_form_call_bdc
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM gen_form_call_bdc.
+  append_code:
+    '*&---------------------------------------------------------------------*',
+    '*&      FORM  CALL_BDC                                                  ',
+    '*&---------------------------------------------------------------------*',
+    '*       TEXT                                                            ',
+    '*----------------------------------------------------------------------*',
+    'FORM CALL_BDC .                                                         ',
+    '  DATA: LT_BDC TYPE TABLE OF BDCDATA,                                   ',
+    '        LS_BDC TYPE BDCDATA,                                            ',
+    '        L_OPT TYPE CTU_PARAMS,                                          ',
+    '        LT_MESSAGES TYPE TABLE OF BDCMSGCOLL,                           ',
+    '        LS_MESSAGE TYPE BDCMSGCOLL.                                     ',
+    '                                                                        ',
+    '  DEFINE D_GEN_BDC_CODE.                                                ',
+    '    LS_BDC-PROGRAM  = &1.                                               ',
+    '    LS_BDC-DYNPRO   = &2.                                               ',
+    '    LS_BDC-DYNBEGIN = &3.                                               ',
+    '    LS_BDC-FNAM     = &4.                                               ',
+    '    LS_BDC-FVAL     = &5.                                               ',
+    '    APPEND LS_BDC TO LT_BDC.                                            ',
+    '    CLEAR: LS_BDC.                                                      ',
+    '  END-OF-DEFINITION.                                                    ',
+    '                                                                        ',
+    '  CALL FUNCTION ''MESSAGES_INITIALIZE''.                                ',
+    '                                                                        ',
+    '  L_OPT-DISMODE = ''N''.                                                ',
+    '  L_OPT-DEFSIZE = ''X''.                                                ',
+    '                                                                        ',
+    '*  D_GEN_BDC_CODE:                                                      ',
+    '*    ''SAPLCOMK''  ''0120''  ''X'' ''''  '''',                          ',
+    '*    ''''  ''''  ''''  ''BDC_CURSOR''  ''RESBD-MATNR(01)'',             ',
+    '*    ''''  ''''  ''''  ''BDC_OKCODE''  ''=KEIN''.                       ',
+    '*                                                                       ',
+    '*  CALL TRANSACTION ''CO02'' USING LT_BDC OPTIONS FROM L_OPT MESSAGES INTO LT_MESSAGES.',
+    '                                                                        ',
+    '  LOOP AT LT_MESSAGES INTO LS_MESSAGE.                                  ',
+    '    CALL FUNCTION ''MESSAGE_STORE''                                     ',
+    '      EXPORTING                                                         ',
+    '        ARBGB = LS_MESSAGE-MSGID                                        ',
+    '        MSGTY = LS_MESSAGE-MSGTYP                                       ',
+    '        MSGV1 = LS_MESSAGE-MSGV1                                        ',
+    '        MSGV2 = LS_MESSAGE-MSGV2                                        ',
+    '        MSGV3 = LS_MESSAGE-MSGV3                                        ',
+    '        MSGV4 = LS_MESSAGE-MSGV4                                        ',
+    '        TXTNR = LS_MESSAGE-MSGNR                                        ',
+    '        ZEILE = SY-TABIX.                                               ',
+    '  ENDLOOP.                                                              ',
+    '                                                                        ',
+    '  REFRESH: LT_BDC, LT_MESSAGES.                                         ',
+    'ENDFORM.                    " CALL_BDC                                  '.
+ENDFORM.                    "gen_form_call_bdc
+*&---------------------------------------------------------------------*
+*&      Form  f4_field
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM f4_field USING p_tabname TYPE tabname
+              CHANGING p_fieldname p_fieldtext p_convexit.
+  DATA: lt_return TYPE TABLE OF ddshretval WITH HEADER LINE,
+        lt_dfies_tab TYPE TABLE OF dfies WITH HEADER LINE,
+        BEGIN OF lt_fields OCCURS 0,
+          fieldname TYPE fieldname,
+          fieldtext TYPE fieldtext,
+          keyflag   TYPE keyflag,
+          datatype  TYPE dynptype,
+          leng      TYPE ddleng,
+          decimals  TYPE decimals,
+          convexit  TYPE convexit,
+        END OF lt_fields.
+
+  CALL FUNCTION 'DDIF_FIELDINFO_GET'
+    EXPORTING
+      tabname        = p_tabname
+      langu          = sy-langu
+    TABLES
+      dfies_tab      = lt_dfies_tab[]
+    EXCEPTIONS
+      not_found      = 1
+      internal_error = 2
+      OTHERS         = 3.
+
+  CHECK sy-subrc = 0.
+
+  DELETE lt_dfies_tab WHERE fieldname = 'MANDT'.
+  LOOP AT lt_dfies_tab.
+    lt_fields-fieldname = lt_dfies_tab-fieldname.
+    lt_fields-fieldtext = lt_dfies_tab-fieldtext.
+    lt_fields-keyflag   = lt_dfies_tab-keyflag  .
+    lt_fields-datatype  = lt_dfies_tab-datatype .
+    lt_fields-leng      = lt_dfies_tab-leng     .
+    lt_fields-decimals  = lt_dfies_tab-decimals .
+    lt_fields-convexit  = lt_dfies_tab-convexit .
+    APPEND lt_fields.
+  ENDLOOP.
+  "调用F4
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield     = 'FIELDNAME'
+      window_title = '选择'
+      value_org    = 'S'
+    TABLES
+      value_tab    = lt_fields[]
+      return_tab   = lt_return[].
+
+  IF lt_return[] IS NOT INITIAL.
+    READ TABLE lt_return INDEX 1.
+    p_fieldname = lt_return-fieldval.
+    READ TABLE lt_fields WITH KEY fieldname = p_fieldname.
+    p_fieldtext = lt_fields-fieldtext.
+    p_convexit  = lt_fields-convexit.
+  ENDIF.
+ENDFORM.                                                    "f4_field
+*&---------------------------------------------------------------------*
+*&      Form  f4_convexit
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM f4_convexit CHANGING p_convexit.
+  STATICS call_times TYPE i.
+  DATA: lt_return TYPE TABLE OF ddshretval WITH HEADER LINE,
+        BEGIN OF lt_convexits OCCURS 0,
+          convexit TYPE convexit,
+          text TYPE fieldtext,
+        END OF lt_convexits.
+
+  "从表TFDIR中取CONVERSION_EXIT*的函数，太多了，此处只列出常用的几个
+  IF call_times IS INITIAL.
+    MESSAGE '系统中的转换例程太多，此处只列出常用的一些' TYPE 'I'.
+    ADD 1 TO call_times.
+  ENDIF.
+
+  lt_convexits-convexit = 'ALPHA'. lt_convexits-text = '前导零'. APPEND lt_convexits.
+  lt_convexits-convexit = 'MATN1'. lt_convexits-text = '物料号'. APPEND lt_convexits.
+  lt_convexits-convexit = 'CUNIT'. lt_convexits-text = '计量单位'. APPEND lt_convexits.
+  lt_convexits-convexit = 'KONPD'. lt_convexits-text = '项目编码'. APPEND lt_convexits.
+  lt_convexits-convexit = 'ABPSP'. lt_convexits-text = 'WBS编码'. APPEND lt_convexits.
+  lt_convexits-convexit = 'PARVW'. lt_convexits-text = '合作伙伴'. APPEND lt_convexits.
+  "调用F4
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield     = 'CONVEXIT'
+      window_title = '选择'
+      value_org    = 'S'
+    TABLES
+      value_tab    = lt_convexits[]
+      return_tab   = lt_return[].
+
+  IF lt_return[] IS NOT INITIAL.
+    READ TABLE lt_return INDEX 1.
+    p_convexit = lt_return-fieldval.
+  ENDIF.
+ENDFORM.                    "f4_convexit
+*&---------------------------------------------------------------------*
+*&      Form  download
+*&---------------------------------------------------------------------*
+*       下载到Excel
+*----------------------------------------------------------------------*
+FORM download.
+  DATA: l_file TYPE string,
+        l_path TYPE string,
+        l_fullpath TYPE string,
+        l_action TYPE i.
+
+  CALL METHOD cl_gui_frontend_services=>file_save_dialog
+    EXPORTING
+      default_file_name = l_file
+    CHANGING
+      filename          = l_file
+      path              = l_path
+      fullpath          = l_fullpath
+      user_action       = l_action.
+
+  CHECK l_action = 0.
+
+  PERFORM create_excel_app.
+  PERFORM open_workbook USING l_fullpath.
+
+* =========FIELDS==========
+  CALL METHOD OF
+      go_book
+      'Sheets' = go_sheet
+    EXPORTING
+      #1       = 'FIELDS'.
+  IF sy-subrc <> 0.
+    MESSAGE '打开FIELDS工作表失败' TYPE 'E'.
+  ENDIF.
+
+  LOOP AT gt_fields INTO gs_field.
+    g_row = sy-tabix + 1.
+    PERFORM set_cell_value USING g_row 1 gs_field-fieldname.
+    PERFORM set_cell_value USING g_row 2 gs_field-ref_table.
+    PERFORM set_cell_value USING g_row 3 gs_field-ref_field.
+    PERFORM set_cell_value USING g_row 4 gs_field-convexit.
+    PERFORM set_cell_value USING g_row 5 gs_field-scrtext_l.
+  ENDLOOP.
+  CALL METHOD cl_gui_cfw=>flush.
+
+  CALL METHOD OF
+    go_book
+    'SAVE'.
+  SET PROPERTY OF go_excel 'Visible' = 1.
+
+  MESSAGE '已下载到Excel文件中，请查看' TYPE 'S'.
+ENDFORM.                    "download
+*&---------------------------------------------------------------------*
+*&      Form  upload
+*&---------------------------------------------------------------------*
+*       从Excel上载
+*----------------------------------------------------------------------*
+FORM upload.
+  DATA: lt_list TYPE TABLE OF spopli WITH HEADER LINE,
+        l_answer TYPE c,
+        lt_filetable TYPE filetable WITH HEADER LINE,
+        l_rc TYPE i,
+        l_action TYPE i,
+        l_flag_close TYPE c.
+
+  IF go_excel IS NOT INITIAL.
+    lt_list-varoption = '从刚下载的Excel文件上载'. APPEND lt_list.
+    lt_list-varoption = '选择新的Excel文件进行上载'. APPEND lt_list.
+
+    CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
+      EXPORTING
+        textline1 = '如果还未关闭已经下载的Excel，可以选择从该Excel文件上载'
+        titel     = '选择'
+      IMPORTING
+        answer    = l_answer
+      TABLES
+        t_spopli  = lt_list[].
+
+    CHECK l_answer <> 'A'.
+  ENDIF.
+
+  IF go_excel IS INITIAL OR l_answer = 2.
+    CALL METHOD cl_gui_frontend_services=>file_open_dialog
+      EXPORTING
+        default_extension       = 'XLS'
+        default_filename        = '*.xls;*.xlsx'
+        file_filter             = 'Excel File (*.xls;*.xlsx)'
+        multiselection          = ''
+      CHANGING
+        file_table              = lt_filetable[]
+        rc                      = l_rc
+        user_action             = l_action
+      EXCEPTIONS
+        file_open_dialog_failed = 1
+        cntl_error              = 2
+        error_no_gui            = 3
+        not_supported_by_gui    = 4
+        OTHERS                  = 5.
+
+    CHECK l_action = 0.
+
+    PERFORM create_excel_app.
+
+    READ TABLE lt_filetable INDEX 1.
+    PERFORM open_workbook USING lt_filetable-filename.
+
+    l_flag_close = 'X'.
+  ENDIF.
+
+  CLEAR: gt_fields.
+
+* =========FIELDS==========
+  CALL METHOD OF
+      go_book
+      'Sheets' = go_sheet
+    EXPORTING
+      #1       = 'FIELDS'.
+  IF sy-subrc <> 0.
+    MESSAGE '打开FIELDS工作表失败' TYPE 'E'.
+  ENDIF.
+
+  WHILE 1 = 1.
+    CLEAR: gs_field.
+    g_row = sy-index + 1.
+    PERFORM get_cell_value USING g_row 1 CHANGING gs_field-fieldname.
+    IF gs_field-fieldname IS INITIAL.
+      EXIT.
+    ENDIF.
+    PERFORM get_cell_value USING g_row 2 CHANGING gs_field-ref_table.
+    PERFORM get_cell_value USING g_row 3 CHANGING gs_field-ref_field.
+    PERFORM get_cell_value USING g_row 4 CHANGING gs_field-convexit.
+    PERFORM get_cell_value USING g_row 5 CHANGING gs_field-scrtext_l.
+    APPEND gs_field TO gt_fields.
+  ENDWHILE.
+
+  IF l_flag_close = 'X'.
+    CALL METHOD OF
+      go_book
+      'Close'.
+    CALL METHOD OF
+      go_excel
+      'QUIT'.
+    FREE OBJECT: go_sheet, go_book, go_books, go_excel.
+  ENDIF.
+
+  MESSAGE '上载完成' TYPE 'S'.
+ENDFORM.                    "upload
+*&---------------------------------------------------------------------*
+*&      Form  create_excel_app
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM create_excel_app.
+  IF go_excel IS INITIAL.
+    CREATE OBJECT go_excel 'Excel.Application'.
+    IF sy-subrc <> 0.
+      MESSAGE '创建Excel程序失败' TYPE 'E'.
+    ENDIF.
+  ENDIF.
+ENDFORM.                    "create_excel_app
+*&---------------------------------------------------------------------*
+*&      Form  open_workbook
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM open_workbook USING p_path.
+  CALL METHOD OF
+    go_excel
+      'Workbooks' = go_books.
+  CALL METHOD OF
+      go_books
+      'Open'   = go_book
+    EXPORTING
+      #1       = p_path.
+  IF sy-subrc <> 0.
+    MESSAGE '打开Excel文件失败' TYPE 'E'.
+  ENDIF.
+ENDFORM.                    "open_workbook
+*&---------------------------------------------------------------------*
+*&      Form  set_cell_value
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM set_cell_value USING p_row TYPE i
+                          p_col TYPE i
+                          p_value.
+  g_row = p_row.
+  g_col = p_col.
+  g_value = p_value.
+
+  CALL METHOD OF
+      go_sheet
+      'CELLS'  = go_cell
+      NO
+      FLUSH
+
+    EXPORTING
+      #1       = g_row
+      #2       = g_col.
+  SET PROPERTY OF go_cell 'Value' = g_value NO FLUSH.
+ENDFORM.                    "set_cell_value
+*&---------------------------------------------------------------------*
+*&      Form  get_cell_value
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM get_cell_value USING p_row TYPE i
+                          p_col TYPE i
+                    CHANGING p_value.
+  CALL METHOD OF
+      go_sheet
+      'CELLS'  = go_cell
+    EXPORTING
+      #1       = p_row
+      #2       = p_col.
+  GET PROPERTY OF go_cell 'Value' = p_value.
+ENDFORM.                    "get_cell_value
+*&---------------------------------------------------------------------*
+*&      Form  CHECK
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM check .
+  DATA: l_index TYPE i VALUE 1,
+        l_tabix TYPE i,
+        lt_fields TYPE TABLE OF typ_field,
+        l_msg TYPE string,
+        l_flag TYPE c.
+
+  DEFINE d_store_message.
+    g_flag_error = 'X'.
+    call function 'MESSAGE_STORE'
+      exporting
+        arbgb = '00'
+        msgty = 'E'
+        txtnr = '001'
+        msgv1 = l_msg
+        msgv2 = ''
+        msgv3 = ''
+        msgv4 = ''
+        zeile = l_index.
+    l_index = l_index + 1.
+  END-OF-DEFINITION.
+
+  CALL FUNCTION 'MESSAGES_INITIALIZE'.
+  CLEAR g_flag_error.
+
+  IF gt_fields IS INITIAL.
+    l_msg = '字段设置为空'.
+    d_store_message.
+  ENDIF.
+
+  "字段重复校验
+  lt_fields = gt_fields.
+  SORT lt_fields BY fieldname.
+  DELETE ADJACENT DUPLICATES FROM lt_fields COMPARING fieldname.
+  IF lines( lt_fields ) <> lines( gt_fields ).
+    l_msg = '字段设置：存在重复字段'.
+    d_store_message.
+  ENDIF.
+
+  "字段设置
+  LOOP AT gt_fields INTO gs_field.
+    l_tabix = sy-tabix.
+    IF gs_field-fieldname IS INITIAL.
+      l_msg = '字段设置：行' && l_tabix && '，字段不能为空'.
+      d_store_message.
+    ENDIF.
+    IF gs_field-ref_table IS NOT INITIAL.
+      SELECT SINGLE tabname INTO gs_field-ref_table FROM dd02l WHERE tabname = gs_field-ref_table AND as4vers = 'A'.
+      IF sy-subrc <> 0.
+        l_msg = '字段设置：行' && l_tabix && '，字段' && gs_field-fieldname && '的参照表' && gs_field-ref_table && '不存在或未激活'.
+        d_store_message.
+      ELSEIF gs_field-ref_field IS NOT INITIAL.
+        PERFORM check_field_exist USING gs_field-ref_table gs_field-ref_field CHANGING l_flag.
+        IF l_flag = 'X'.
+          l_msg = '字段设置：行' && l_tabix && '，字段' && gs_field-fieldname && '的参照表' && gs_field-ref_table && '中参照字段' && gs_field-ref_field &&'不存在或未激活'.
+          d_store_message.
+        ENDIF.
+      ENDIF.
+    ELSE.
+      IF gs_field-ref_field IS NOT INITIAL.
+        SELECT SINGLE rollname INTO gs_field-ref_field FROM dd04l WHERE rollname = gs_field-ref_field AND as4vers = 'A'.
+        IF sy-subrc <> 0.
+          l_msg = '字段设置：行' && l_tabix && '，字段' && gs_field-fieldname && '的参照字段(数据元素)' && gs_field-ref_field &&'不存在或未激活'.
+          d_store_message.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  IF g_flag_error = 'X'.
+    CALL FUNCTION 'MESSAGES_SHOW'.
+  ENDIF.
+ENDFORM.                    " CHECK
+*&---------------------------------------------------------------------*
+*&      Form  ALV_REFRESH_DISPLAY
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM alv_refresh_display .
+  go_alv_fields->refresh_table_display( ).
+ENDFORM.                    " ALV_REFRESH_DISPLAY
+*&---------------------------------------------------------------------*
+*&      Form  check_field_exist
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+FORM check_field_exist USING p_tabname TYPE tabname
+                             p_fieldname TYPE fieldname
+                       CHANGING p_flag TYPE c.
+  DATA: l_fieldname TYPE fieldname.
+
+  CLEAR p_flag.
+  SELECT SINGLE fieldname INTO l_fieldname FROM dd03l
+    WHERE tabname = p_tabname AND fieldname = p_fieldname AND as4local = 'A'.
+  CHECK sy-subrc <> 0.
+  p_flag = 'X'.
+ENDFORM.                    "check_field_exist
