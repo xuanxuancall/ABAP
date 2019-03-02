@@ -5,8 +5,6 @@
 *&---------------------------------------------------------------------*
 REPORT Y_TEST_3.
 
-*REPORT zcode_generator_dtel_and_doma.
-
 TABLES sscrfields.
 
 SELECTION-SCREEN BEGIN OF BLOCK 001 WITH FRAME TITLE title1.
